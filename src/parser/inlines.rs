@@ -51,7 +51,7 @@ struct Flags {
 }
 
 /// A reference map
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RefMap {
     /// The map of references
     pub map: HashMap<String, Reference>,
@@ -67,6 +67,12 @@ impl RefMap {
             max_ref_size: usize::MAX,
             ref_size: 0,
         }
+    }
+    
+    /// Combines this refmap with another
+    pub fn extend(&mut self, other: RefMap) {
+        self.map.extend(other.map);
+        self.ref_size += other.ref_size;
     }
     
     /// Looks up a reference by label

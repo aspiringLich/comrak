@@ -141,6 +141,7 @@ pub fn parse_document_refs<'a>(arena: &'a Arena<AstNode<'a>>, buffer: &str) -> R
     let mut parser = Parser::new(arena, root, &opt, None);
     let mut linebuf = Vec::with_capacity(buffer.len());
     parser.feed(&mut linebuf, buffer, true);
+    parser.finish(linebuf);
     // parser.parse_inlines(root);
     parser.refmap
 }
