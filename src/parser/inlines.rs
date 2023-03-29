@@ -50,14 +50,17 @@ struct Flags {
     skip_html_comment: bool,
 }
 
+/// A reference map
 #[derive(Debug)]
 pub struct RefMap {
+    /// The map of references
     pub map: HashMap<String, Reference>,
     pub(crate) max_ref_size: usize,
     ref_size: usize,
 }
 
 impl RefMap {
+    /// Creates a new RefMap
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -65,7 +68,8 @@ impl RefMap {
             ref_size: 0,
         }
     }
-
+    
+    /// Looks up a reference by label
     pub fn lookup(&mut self, lab: &str) -> Option<Reference> {
         match self.map.get(lab) {
             Some(entry) => {

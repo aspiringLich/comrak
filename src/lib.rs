@@ -97,7 +97,7 @@ use nodes::Ast;
 use nodes::AstNode;
 use nodes::NodeValue;
 use parser::Parser;
-use parser::inlines::RefMap;
+pub use parser::inlines::RefMap;
 pub use parser::{
     parse_document, parse_document_with_broken_link_callback, ComrakExtensionOptions,
     ComrakOptions, ComrakParseOptions, ComrakPlugins, ComrakRenderOptions, ComrakRenderPlugins,
