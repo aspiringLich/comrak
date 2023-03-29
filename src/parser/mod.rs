@@ -1,5 +1,5 @@
 mod autolink;
-mod inlines;
+pub mod inlines;
 #[cfg(feature = "shortcodes")]
 pub mod shortcodes;
 mod table;
@@ -114,7 +114,7 @@ type Callback<'c> = &'c mut dyn FnMut(&str) -> Option<(String, String)>;
 
 pub struct Parser<'a, 'o, 'c> {
     arena: &'a Arena<AstNode<'a>>,
-    refmap: RefMap,
+    pub refmap: RefMap,
     root: &'a AstNode<'a>,
     current: &'a AstNode<'a>,
     line_number: u32,
@@ -572,7 +572,7 @@ impl Debug for ComrakRenderPlugins<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Reference {
     pub url: String,
     pub title: String,
@@ -584,7 +584,7 @@ struct FootnoteDefinition<'a> {
 }
 
 impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
-    fn new(
+    pub fn new(
         arena: &'a Arena<AstNode<'a>>,
         root: &'a AstNode<'a>,
         options: &'o ComrakOptions,
@@ -612,7 +612,7 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
         }
     }
 
-    fn feed(&mut self, linebuf: &mut Vec<u8>, mut s: &str, eof: bool) {
+    pub fn feed(&mut self, linebuf: &mut Vec<u8>, mut s: &str, eof: bool) {
         if let (0, Some(delimiter)) = (
             self.total_size,
             &self.options.extension.front_matter_delimiter,
@@ -1620,7 +1620,7 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
         }
     }
 
-    fn parse_inlines(&mut self, node: &'a AstNode<'a>) {
+    pub fn parse_inlines(&mut self, node: &'a AstNode<'a>) {
         let delimiter_arena = Arena::new();
         let node_data = node.data.borrow();
         let content = strings::rtrim_slice(node_data.content.as_bytes());

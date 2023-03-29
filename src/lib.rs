@@ -70,6 +70,7 @@
 )]
 #![allow(unknown_lints, clippy::doc_markdown, cyclomatic_complexity)]
 
+use std::cell::RefCell;
 use std::io::BufWriter;
 
 pub mod adapters;
@@ -86,11 +87,17 @@ mod strings;
 #[cfg(test)]
 mod tests;
 
+use arena_tree::Node;
 pub use cm::format_document as format_commonmark;
 pub use cm::format_document_with_plugins as format_commonmark_with_plugins;
 pub use html::format_document as format_html;
 pub use html::format_document_with_plugins as format_html_with_plugins;
 pub use html::Anchorizer;
+use nodes::Ast;
+use nodes::AstNode;
+use nodes::NodeValue;
+use parser::Parser;
+use parser::inlines::RefMap;
 pub use parser::{
     parse_document, parse_document_with_broken_link_callback, ComrakExtensionOptions,
     ComrakOptions, ComrakParseOptions, ComrakPlugins, ComrakRenderOptions, ComrakRenderPlugins,
@@ -118,6 +125,24 @@ pub fn markdown_to_html_with_plugins(
     let mut bw = BufWriter::new(Vec::new());
     format_html_with_plugins(root, options, &mut bw, plugins).unwrap();
     String::from_utf8(bw.into_inner().unwrap()).unwrap()
+}
+
+/// Parse a Morkdown document for it's links
+pub fn parse_document_refs<'a>(arena: &'a Arena<AstNode<'a>>, buffer: &str) -> RefMap {
+    let root: &'a AstNode<'a> = arena.alloc(Node::new(RefCell::new(Ast {
+        value: NodeValue::Document,
+        content: String::new(),
+        start_line: 0,
+        open: true,
+        last_line_blank: false,
+        table_visited: false,
+    })));
+    let opt = ComrakOptions::default();
+    let mut parser = Parser::new(arena, root, &opt, None);
+    let mut linebuf = Vec::with_capacity(buffer.len());
+    parser.feed(&mut linebuf, buffer, true);
+    // parser.parse_inlines(root);
+    parser.refmap
 }
 
 /// Return the version of the crate.

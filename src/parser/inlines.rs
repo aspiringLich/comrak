@@ -50,6 +50,7 @@ struct Flags {
     skip_html_comment: bool,
 }
 
+#[derive(Debug)]
 pub struct RefMap {
     pub map: HashMap<String, Reference>,
     pub(crate) max_ref_size: usize,
@@ -65,7 +66,7 @@ impl RefMap {
         }
     }
 
-    fn lookup(&mut self, lab: &str) -> Option<Reference> {
+    pub fn lookup(&mut self, lab: &str) -> Option<Reference> {
         match self.map.get(lab) {
             Some(entry) => {
                 let size = entry.url.len() + entry.title.len();
