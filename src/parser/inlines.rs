@@ -68,13 +68,13 @@ impl RefMap {
             ref_size: 0,
         }
     }
-    
+
     /// Combines this refmap with another
     pub fn extend(&mut self, other: RefMap) {
         self.map.extend(other.map);
         self.ref_size += other.ref_size;
     }
-    
+
     /// Looks up a reference by label
     pub fn lookup(&mut self, lab: &str) -> Option<Reference> {
         match self.map.get(lab) {

@@ -1459,7 +1459,7 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
                 .push_str(str::from_utf8(&line[self.offset..]).unwrap()); // TODO: try propagating &[u8] to &str up from here
         }
     }
-    
+
     /// e
     pub fn finish(&mut self, remaining: Vec<u8>) -> &'a AstNode<'a> {
         if !remaining.is_empty() {
