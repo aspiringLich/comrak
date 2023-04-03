@@ -68,7 +68,13 @@
     unstable_features,
     unused_import_braces
 )]
-#![allow(unknown_lints, clippy::doc_markdown, cyclomatic_complexity)]
+#![allow(
+    unknown_lints,
+    clippy::doc_markdown,
+    cyclomatic_complexity,
+    clippy::bool_to_int_with_if,
+    clippy::too_many_arguments
+)]
 
 use std::cell::RefCell;
 use std::io::BufWriter;
@@ -78,7 +84,7 @@ pub mod arena_tree;
 mod cm;
 mod ctype;
 mod entity;
-mod html;
+pub mod html;
 pub mod nodes;
 mod parser;
 pub mod plugins;
@@ -86,6 +92,7 @@ mod scanners;
 mod strings;
 #[cfg(test)]
 mod tests;
+mod xml;
 
 use arena_tree::Node;
 pub use cm::format_document as format_commonmark;
@@ -104,6 +111,8 @@ pub use parser::{
     ListStyleType,
 };
 pub use typed_arena::Arena;
+pub use xml::format_document as format_xml;
+pub use xml::format_document_with_plugins as format_xml_with_plugins;
 
 /// Render Markdown to HTML.
 ///
@@ -151,11 +160,31 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Render Markdown to CommonMark.
+/// Render Markdown back to CommonMark.
 pub fn markdown_to_commonmark(md: &str, options: &ComrakOptions) -> String {
     let arena = Arena::new();
     let root = parse_document(&arena, md, options);
     let mut bw = BufWriter::new(Vec::new());
     format_commonmark(root, options, &mut bw).unwrap();
+    String::from_utf8(bw.into_inner().unwrap()).unwrap()
+}
+
+/// Render Markdown to CommonMark XML.
+/// See https://github.com/commonmark/commonmark-spec/blob/master/CommonMark.dtd.
+pub fn markdown_to_commonmark_xml(md: &str, options: &ComrakOptions) -> String {
+    markdown_to_commonmark_xml_with_plugins(md, options, &ComrakPlugins::default())
+}
+
+/// Render Markdown to CommonMark XML using plugins.
+/// See https://github.com/commonmark/commonmark-spec/blob/master/CommonMark.dtd.
+pub fn markdown_to_commonmark_xml_with_plugins(
+    md: &str,
+    options: &ComrakOptions,
+    plugins: &ComrakPlugins,
+) -> String {
+    let arena = Arena::new();
+    let root = parse_document(&arena, md, options);
+    let mut bw = BufWriter::new(Vec::new());
+    format_xml_with_plugins(root, options, &mut bw, plugins).unwrap();
     String::from_utf8(bw.into_inner().unwrap()).unwrap()
 }
