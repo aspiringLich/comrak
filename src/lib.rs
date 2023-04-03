@@ -141,7 +141,8 @@ pub fn parse_document_refs<'a>(arena: &'a Arena<AstNode<'a>>, buffer: &str) -> R
     let root: &'a AstNode<'a> = arena.alloc(Node::new(RefCell::new(Ast {
         value: NodeValue::Document,
         content: String::new(),
-        start_line: 0,
+        sourcepos: (1, 1, 1, 1).into(),
+        internal_offset: 0,
         open: true,
         last_line_blank: false,
         table_visited: false,
