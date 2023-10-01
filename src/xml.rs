@@ -1,25 +1,28 @@
-use crate::nodes::{AstNode, ListType, NodeCode, NodeValue};
-use crate::parser::{ComrakOptions, ComrakPlugins};
+use crate::nodes::{AstNode, ListType, NodeCode, NodeTable, NodeValue};
+use crate::parser::{Options, Plugins};
 use once_cell::sync::Lazy;
+use std::cmp;
 use std::io::{self, Write};
 
 use crate::nodes::NodeHtmlBlock;
 
+const MAX_INDENT: u32 = 40;
+
 /// Formats an AST as HTML, modified by the given options.
 pub fn format_document<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
 ) -> io::Result<()> {
-    format_document_with_plugins(root, options, output, &ComrakPlugins::default())
+    format_document_with_plugins(root, options, output, &Plugins::default())
 }
 
 /// Formats an AST as HTML, modified by the given options. Accepts custom plugins.
 pub fn format_document_with_plugins<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
-    plugins: &ComrakPlugins,
+    plugins: &Plugins,
 ) -> io::Result<()> {
     output.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")?;
     output.write_all(b"<!DOCTYPE document SYSTEM \"CommonMark.dtd\">\n")?;
@@ -29,17 +32,13 @@ pub fn format_document_with_plugins<'a>(
 
 struct XmlFormatter<'o> {
     output: &'o mut dyn Write,
-    options: &'o ComrakOptions,
-    _plugins: &'o ComrakPlugins<'o>,
+    options: &'o Options,
+    _plugins: &'o Plugins<'o>,
     indent: u32,
 }
 
 impl<'o> XmlFormatter<'o> {
-    fn new(
-        options: &'o ComrakOptions,
-        output: &'o mut dyn Write,
-        plugins: &'o ComrakPlugins,
-    ) -> Self {
+    fn new(options: &'o Options, output: &'o mut dyn Write, plugins: &'o Plugins) -> Self {
         XmlFormatter {
             options,
             output,
@@ -125,7 +124,7 @@ impl<'o> XmlFormatter<'o> {
     }
 
     fn indent(&mut self) -> io::Result<()> {
-        for _ in 0..self.indent {
+        for _ in 0..(cmp::min(self.indent, MAX_INDENT)) {
             self.output.write_all(b" ")?;
         }
         Ok(())
@@ -219,23 +218,25 @@ impl<'o> XmlFormatter<'o> {
                     let header_row = &ancestors.next().unwrap().data.borrow().value;
                     let table = &ancestors.next().unwrap().data.borrow().value;
 
-                    if let (NodeValue::TableRow(true), NodeValue::Table(aligns)) =
-                        (header_row, table)
+                    if let (
+                        NodeValue::TableRow(true),
+                        NodeValue::Table(NodeTable { alignments, .. }),
+                    ) = (header_row, table)
                     {
                         let ix = node.preceding_siblings().count() - 1;
-                        if let Some(xml_align) = aligns[ix].xml_name() {
+                        if let Some(xml_align) = alignments[ix].xml_name() {
                             write!(self.output, " align=\"{}\"", xml_align)?;
                         }
                     }
                 }
                 NodeValue::FootnoteDefinition(ref fd) => {
                     self.output.write_all(b" label=\"")?;
-                    self.escape(fd.as_bytes())?;
+                    self.escape(fd.name.as_bytes())?;
                     self.output.write_all(b"\"")?;
                 }
-                NodeValue::FootnoteReference(ref fr) => {
+                NodeValue::FootnoteReference(ref nfr) => {
                     self.output.write_all(b" label=\"")?;
-                    self.escape(fr.as_bytes())?;
+                    self.escape(nfr.name.as_bytes())?;
                     self.output.write_all(b"\"")?;
                 }
                 NodeValue::TaskItem(Some(_)) => {

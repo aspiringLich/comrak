@@ -8,8 +8,8 @@ use super::*;
 #[test]
 fn exercise_full_api() {
     let arena = Arena::new();
-    let default_options = ComrakOptions::default();
-    let default_plugins = ComrakPlugins::default();
+    let default_options = Options::default();
+    let default_plugins = Plugins::default();
     let node = parse_document(&arena, "# My document\n", &default_options);
     let mut buffer = vec![];
 
@@ -34,37 +34,35 @@ fn exercise_full_api() {
         Some(&mut |_: &str| Some(("abc".to_string(), "xyz".to_string()))),
     );
 
-    let _ = ComrakOptions {
-        extension: ComrakExtensionOptions {
-            strikethrough: false,
-            tagfilter: false,
-            table: false,
-            autolink: false,
-            tasklist: false,
-            superscript: false,
-            header_ids: Some("abc".to_string()),
-            footnotes: false,
-            description_lists: false,
-            front_matter_delimiter: None,
-            #[cfg(feature = "shortcodes")]
-            shortcodes: true,
-        },
-        parse: ComrakParseOptions {
-            smart: false,
-            default_info_string: Some("abc".to_string()),
-            relaxed_tasklist_matching: true,
-        },
-        render: ComrakRenderOptions {
-            hardbreaks: false,
-            github_pre_lang: false,
-            full_info_string: false,
-            width: 123456,
-            unsafe_: false,
-            escape: false,
-            list_style: ListStyleType::Dash,
-            sourcepos: false,
-        },
-    };
+    let mut extension = ExtensionOptionsBuilder::default();
+    extension.strikethrough(false);
+    extension.tagfilter(false);
+    extension.table(false);
+    extension.autolink(false);
+    extension.tasklist(false);
+    extension.superscript(false);
+    extension.header_ids(Some("abc".to_string()));
+    extension.footnotes(false);
+    extension.description_lists(false);
+    extension.front_matter_delimiter(None);
+    #[cfg(feature = "shortcodes")]
+    extension.shortcodes(true);
+
+    let mut parse = ParseOptionsBuilder::default();
+    parse.smart(false);
+    parse.default_info_string(Some("abc".to_string()));
+    parse.relaxed_tasklist_matching(false);
+    parse.relaxed_autolinks(false);
+
+    let mut render = RenderOptionsBuilder::default();
+    render.hardbreaks(false);
+    render.github_pre_lang(false);
+    render.full_info_string(false);
+    render.width(123456);
+    render.unsafe_(false);
+    render.escape(false);
+    render.list_style(ListStyleType::Dash);
+    render.sourcepos(false);
 
     pub struct MockAdapter {}
     impl SyntaxHighlighterAdapter for MockAdapter {
@@ -111,12 +109,12 @@ fn exercise_full_api() {
 
     let mock_adapter = MockAdapter {};
 
-    let _ = ComrakPlugins {
-        render: ComrakRenderPlugins {
-            codefence_syntax_highlighter: Some(&mock_adapter),
-            heading_adapter: Some(&mock_adapter),
-        },
-    };
+    let mut render_plugins = RenderPluginsBuilder::default();
+    render_plugins.codefence_syntax_highlighter(Some(&mock_adapter));
+    render_plugins.heading_adapter(Some(&mock_adapter));
+
+    let mut plugins = PluginsBuilder::default();
+    plugins.render(render_plugins.build().unwrap());
 
     let _: String = markdown_to_html("# Yes", &default_options);
 
@@ -164,12 +162,15 @@ fn exercise_full_api() {
             let _: bool = nh.setext;
         }
         nodes::NodeValue::ThematicBreak => {}
-        nodes::NodeValue::FootnoteDefinition(name) => {
-            let _: &String = name;
+        nodes::NodeValue::FootnoteDefinition(nfd) => {
+            let _: &String = &nfd.name;
+            let _: u32 = nfd.total_references;
         }
-        nodes::NodeValue::Table(aligns) => {
-            let _: &Vec<nodes::TableAlignment> = aligns;
-            match aligns[0] {
+        nodes::NodeValue::Table(nt) => {
+            let _: &Vec<nodes::TableAlignment> = &nt.alignments;
+            let _: usize = nt.num_nonempty_cells;
+            let _: usize = nt.num_rows;
+            match nt.alignments[0] {
                 nodes::TableAlignment::None => {}
                 nodes::TableAlignment::Left => {}
                 nodes::TableAlignment::Center => {}
@@ -207,8 +208,9 @@ fn exercise_full_api() {
         nodes::NodeValue::ShortCode(ne) => {
             let _: &str = ne.shortcode();
         }
-        nodes::NodeValue::FootnoteReference(name) => {
-            let _: &String = name;
+        nodes::NodeValue::FootnoteReference(nfr) => {
+            let _: String = nfr.name;
+            let _: u32 = nfr.ix;
         }
     }
 }

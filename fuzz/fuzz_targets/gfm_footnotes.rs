@@ -14,12 +14,12 @@ fuzz_target!(|s: &str| {
     extension.tagfilter = true;
     extension.table = true;
     extension.autolink = true;
+    extension.footnotes = true;
 
     let mut render = RenderOptions::default();
     render.hardbreaks = true;
     render.github_pre_lang = true;
     render.unsafe_ = true;
-    render.sourcepos = true;
 
     markdown_to_html(
         s,

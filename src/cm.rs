@@ -2,14 +2,14 @@ use crate::ctype::{isalpha, isdigit, ispunct, isspace};
 use crate::nodes::TableAlignment;
 use crate::nodes::{
     AstNode, ListDelimType, ListType, NodeCodeBlock, NodeHeading, NodeHtmlBlock, NodeLink,
-    NodeValue,
+    NodeTable, NodeValue,
 };
 #[cfg(feature = "shortcodes")]
 use crate::parser::shortcodes::NodeShortCode;
-use crate::parser::ComrakOptions;
+use crate::parser::Options;
 use crate::scanners;
 use crate::strings::trim_start_match;
-use crate::{nodes, ComrakPlugins};
+use crate::{nodes, Plugins};
 
 use std::cmp::max;
 use std::io::{self, Write};
@@ -17,18 +17,18 @@ use std::io::{self, Write};
 /// Formats an AST as CommonMark, modified by the given options.
 pub fn format_document<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
 ) -> io::Result<()> {
-    format_document_with_plugins(root, options, output, &ComrakPlugins::default())
+    format_document_with_plugins(root, options, output, &Plugins::default())
 }
 
 /// Formats an AST as CommonMark, modified by the given options. Accepts custom plugins.
 pub fn format_document_with_plugins<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
-    _plugins: &ComrakPlugins,
+    _plugins: &Plugins,
 ) -> io::Result<()> {
     let mut f = CommonMarkFormatter::new(root, options);
     f.format(root);
@@ -41,7 +41,7 @@ pub fn format_document_with_plugins<'a>(
 
 struct CommonMarkFormatter<'a, 'o> {
     node: &'a AstNode<'a>,
-    options: &'o ComrakOptions,
+    options: &'o Options,
     v: Vec<u8>,
     prefix: Vec<u8>,
     column: usize,
@@ -75,7 +75,7 @@ impl<'a, 'o> Write for CommonMarkFormatter<'a, 'o> {
 }
 
 impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
-    fn new(node: &'a AstNode<'a>, options: &'o ComrakOptions) -> Self {
+    fn new(node: &'a AstNode<'a>, options: &'o Options) -> Self {
         CommonMarkFormatter {
             node,
             options,
@@ -308,13 +308,23 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
         self.node = node;
         let allow_wrap = self.options.render.width > 0 && !self.options.render.hardbreaks;
 
-        if !(matches!(
-            node.data.borrow().value,
-            NodeValue::Item(..) | NodeValue::TaskItem(..)
-        ) && node.previous_sibling().is_none()
-            && entering)
-        {
-            self.in_tight_list_item = self.get_in_tight_list_item(node);
+        let parent_node = node.parent();
+        if entering {
+            if parent_node.is_some()
+                && matches!(
+                    parent_node.unwrap().data.borrow().value,
+                    NodeValue::Item(..) | NodeValue::TaskItem(..)
+                )
+            {
+                self.in_tight_list_item = self.get_in_tight_list_item(node);
+            }
+        } else if matches!(node.data.borrow().value, NodeValue::List(..)) {
+            self.in_tight_list_item = parent_node.is_some()
+                && matches!(
+                    parent_node.unwrap().data.borrow().value,
+                    NodeValue::Item(..) | NodeValue::TaskItem(..)
+                )
+                && self.get_in_tight_list_item(node);
         }
 
         match node.data.borrow().value {
@@ -343,7 +353,13 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
             NodeValue::HtmlInline(ref literal) => {
                 self.format_html_inline(literal.as_bytes(), entering)
             }
-            NodeValue::Strong => self.format_strong(),
+            NodeValue::Strong => {
+                if parent_node.is_none()
+                    || !matches!(parent_node.unwrap().data.borrow().value, NodeValue::Strong)
+                {
+                    self.format_strong();
+                }
+            }
             NodeValue::Emph => self.format_emph(node),
             NodeValue::TaskItem(symbol) => self.format_task_item(symbol, node, entering),
             NodeValue::Strikethrough => self.format_strikethrough(),
@@ -355,9 +371,11 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
             NodeValue::Table(..) => self.format_table(entering),
             NodeValue::TableRow(..) => self.format_table_row(entering),
             NodeValue::TableCell => self.format_table_cell(node, entering),
-            NodeValue::FootnoteDefinition(_) => self.format_footnote_definition(entering),
-            NodeValue::FootnoteReference(ref r) => {
-                self.format_footnote_reference(r.as_bytes(), entering)
+            NodeValue::FootnoteDefinition(ref nfd) => {
+                self.format_footnote_definition(&nfd.name, entering)
+            }
+            NodeValue::FootnoteReference(ref nfr) => {
+                self.format_footnote_reference(nfr.name.as_bytes(), entering)
             }
         };
         true
@@ -408,13 +426,12 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
         let marker_width = if parent.list_type == ListType::Bullet {
             2
         } else {
-            let mut list_number = parent.start;
+            let list_number = match node.data.borrow().value {
+                NodeValue::Item(ref ni) => ni.start,
+                NodeValue::TaskItem(_) => parent.start,
+                _ => unreachable!(),
+            };
             let list_delim = parent.delimiter;
-            let mut tmpch = node;
-            while let Some(tmp) = tmpch.previous_sibling() {
-                tmpch = tmp;
-                list_number += 1;
-            }
             write!(
                 listmarker,
                 "{}{}{}",
@@ -715,7 +732,7 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
             if in_header && node.next_sibling().is_none() {
                 let table = &node.parent().unwrap().parent().unwrap().data.borrow().value;
                 let alignments = match *table {
-                    NodeValue::Table(ref alignments) => alignments,
+                    NodeValue::Table(NodeTable { ref alignments, .. }) => alignments,
                     _ => panic!(),
                 };
 
@@ -738,11 +755,10 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
             }
         }
     }
-    fn format_footnote_definition(&mut self, entering: bool) {
+    fn format_footnote_definition(&mut self, name: &str, entering: bool) {
         if entering {
             self.footnote_ix += 1;
-            let footnote_ix = self.footnote_ix;
-            writeln!(self, "[^{}]:", footnote_ix).unwrap();
+            writeln!(self, "[^{}]:", name).unwrap();
             write!(self.prefix, "    ").unwrap();
         } else {
             let new_len = self.prefix.len() - 4;

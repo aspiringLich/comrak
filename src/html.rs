@@ -1,7 +1,9 @@
 //! The HTML renderer for the CommonMark AST, as well as helper functions.
 use crate::ctype::isspace;
-use crate::nodes::{AstNode, ListType, NodeCode, NodeValue, TableAlignment};
-use crate::parser::{ComrakOptions, ComrakPlugins};
+use crate::nodes::{
+    AstNode, ListType, NodeCode, NodeFootnoteDefinition, NodeTable, NodeValue, TableAlignment,
+};
+use crate::parser::{Options, Plugins};
 use crate::scanners;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -16,18 +18,18 @@ use crate::adapters::HeadingMeta;
 /// Formats an AST as HTML, modified by the given options.
 pub fn format_document<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
 ) -> io::Result<()> {
-    format_document_with_plugins(root, options, output, &ComrakPlugins::default())
+    format_document_with_plugins(root, options, output, &Plugins::default())
 }
 
 /// Formats an AST as HTML, modified by the given options. Accepts custom plugins.
 pub fn format_document_with_plugins<'a>(
     root: &'a AstNode<'a>,
-    options: &ComrakOptions,
+    options: &Options,
     output: &mut dyn Write,
-    plugins: &ComrakPlugins,
+    plugins: &Plugins,
 ) -> io::Result<()> {
     let mut writer = WriteWithLast {
         output,
@@ -105,21 +107,19 @@ impl Anchorizer {
         static REJECTED_CHARS: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"[^\p{L}\p{M}\p{N}\p{Pc} -]").unwrap());
 
-        let mut id = header;
-        id = id.to_lowercase();
-        id = REJECTED_CHARS.replace_all(&id, "").to_string();
-        id = id.replace(' ', "-");
+        let mut id = header.to_lowercase();
+        id = REJECTED_CHARS.replace_all(&id, "").replace(' ', "-");
 
         let mut uniq = 0;
         id = loop {
             let anchor = if uniq == 0 {
-                Cow::from(&*id)
+                Cow::from(&id)
             } else {
-                Cow::from(format!("{}-{}", &id, uniq))
+                Cow::from(format!("{}-{}", id, uniq))
             };
 
             if !self.0.contains(&*anchor) {
-                break anchor.to_string();
+                break anchor.into_owned();
             }
 
             uniq += 1;
@@ -131,11 +131,11 @@ impl Anchorizer {
 
 struct HtmlFormatter<'o> {
     output: &'o mut WriteWithLast<'o>,
-    options: &'o ComrakOptions,
+    options: &'o Options,
     anchorizer: Anchorizer,
     footnote_ix: u32,
     written_footnote_ix: u32,
-    plugins: &'o ComrakPlugins<'o>,
+    plugins: &'o Plugins<'o>,
 }
 
 #[rustfmt::skip]
@@ -365,11 +365,7 @@ where
 }
 
 impl<'o> HtmlFormatter<'o> {
-    fn new(
-        options: &'o ComrakOptions,
-        output: &'o mut WriteWithLast<'o>,
-        plugins: &'o ComrakPlugins,
-    ) -> Self {
+    fn new(options: &'o Options, output: &'o mut WriteWithLast<'o>, plugins: &'o Plugins) -> Self {
         HtmlFormatter {
             options,
             output,
@@ -703,13 +699,13 @@ impl<'o> HtmlFormatter<'o> {
                         self.render_sourcepos(node)?;
                         self.output.write_all(b">")?;
                     } else {
-                        if matches!(
-                            node.parent().unwrap().data.borrow().value,
-                            NodeValue::FootnoteDefinition(..)
-                        ) && node.next_sibling().is_none()
+                        if let NodeValue::FootnoteDefinition(nfd) =
+                            &node.parent().unwrap().data.borrow().value
                         {
-                            self.output.write_all(b" ")?;
-                            self.put_footnote_backref()?;
+                            if node.next_sibling().is_none() {
+                                self.output.write_all(b" ")?;
+                                self.put_footnote_backref(nfd)?;
+                            }
                         }
                         self.output.write_all(b"</p>\n")?;
                     }
@@ -764,12 +760,17 @@ impl<'o> HtmlFormatter<'o> {
                 }
             }
             NodeValue::Strong => {
-                if entering {
-                    self.output.write_all(b"<strong")?;
-                    self.render_sourcepos(node)?;
-                    self.output.write_all(b">")?;
-                } else {
-                    self.output.write_all(b"</strong>")?;
+                let parent_node = node.parent();
+                if parent_node.is_none()
+                    || !matches!(parent_node.unwrap().data.borrow().value, NodeValue::Strong)
+                {
+                    if entering {
+                        self.output.write_all(b"<strong")?;
+                        self.render_sourcepos(node)?;
+                        self.output.write_all(b">")?;
+                    } else {
+                        self.output.write_all(b"</strong>")?;
+                    }
                 }
             }
             NodeValue::Emph => {
@@ -892,7 +893,7 @@ impl<'o> HtmlFormatter<'o> {
 
                 let table = &node.parent().unwrap().parent().unwrap().data.borrow().value;
                 let alignments = match *table {
-                    NodeValue::Table(ref alignments) => alignments,
+                    NodeValue::Table(NodeTable { ref alignments, .. }) => alignments,
                     _ => panic!(),
                 };
 
@@ -933,7 +934,7 @@ impl<'o> HtmlFormatter<'o> {
                     self.output.write_all(b"</td>")?;
                 }
             }
-            NodeValue::FootnoteDefinition(_) => {
+            NodeValue::FootnoteDefinition(ref nfd) => {
                 if entering {
                     if self.footnote_ix == 0 {
                         self.output.write_all(b"<section")?;
@@ -944,22 +945,33 @@ impl<'o> HtmlFormatter<'o> {
                     self.footnote_ix += 1;
                     self.output.write_all(b"<li")?;
                     self.render_sourcepos(node)?;
-                    writeln!(self.output, " id=\"fn-{}\">", self.footnote_ix)?;
+                    self.output.write_all(b" id=\"fn-")?;
+                    self.escape_href(nfd.name.as_bytes())?;
+                    self.output.write_all(b"\">")?;
                 } else {
-                    if self.put_footnote_backref()? {
+                    if self.put_footnote_backref(nfd)? {
                         self.output.write_all(b"\n")?;
                     }
                     self.output.write_all(b"</li>\n")?;
                 }
             }
-            NodeValue::FootnoteReference(ref r) => {
+            NodeValue::FootnoteReference(ref nfr) => {
                 if entering {
+                    let mut ref_id = format!("fnref-{}", nfr.name);
+
                     self.output.write_all(b"<sup")?;
                     self.render_sourcepos(node)?;
-                    write!(
-                        self.output, " class=\"footnote-ref\"><a href=\"#fn-{}\" id=\"fnref-{}\" data-footnote-ref>{}</a></sup>",
-                        r, r, r
-                    )?;
+
+                    if nfr.ref_num > 1 {
+                        ref_id = format!("{}-{}", ref_id, nfr.ref_num);
+                    }
+
+                    self.output
+                        .write_all(b" class=\"footnote-ref\"><a href=\"#fn-")?;
+                    self.escape_href(nfr.name.as_bytes())?;
+                    self.output.write_all(b"\" id=\"")?;
+                    self.escape_href(ref_id.as_bytes())?;
+                    write!(self.output, "\" data-footnote-ref>{}</a></sup>", nfr.ix)?;
                 }
             }
             NodeValue::TaskItem(symbol) => {
@@ -970,7 +982,7 @@ impl<'o> HtmlFormatter<'o> {
                     self.output.write_all(b">")?;
                     write!(
                         self.output,
-                        "<input type=\"checkbox\" disabled=\"\" {}/> ",
+                        "<input type=\"checkbox\" {}disabled=\"\" /> ",
                         if symbol.is_some() {
                             "checked=\"\" "
                         } else {
@@ -995,17 +1007,31 @@ impl<'o> HtmlFormatter<'o> {
         Ok(())
     }
 
-    fn put_footnote_backref(&mut self) -> io::Result<bool> {
+    fn put_footnote_backref(&mut self, nfd: &NodeFootnoteDefinition) -> io::Result<bool> {
         if self.written_footnote_ix >= self.footnote_ix {
             return Ok(false);
         }
 
         self.written_footnote_ix = self.footnote_ix;
-        write!(
-            self.output,
-            "<a href=\"#fnref-{}\" class=\"footnote-backref\" data-footnote-backref aria-label=\"Back to content\">↩</a>",
-            self.footnote_ix
-        )?;
+
+        let mut ref_suffix = String::new();
+        let mut superscript = String::new();
+
+        for ref_num in 1..=nfd.total_references {
+            if ref_num > 1 {
+                ref_suffix = format!("-{}", ref_num);
+                superscript = format!("<sup class=\"footnote-ref\">{}</sup>", ref_num);
+                write!(self.output, " ")?;
+            }
+
+            self.output.write_all(b"<a href=\"#fnref-")?;
+            self.escape_href(nfd.name.as_bytes())?;
+            write!(
+                self.output,
+                "{}\" class=\"footnote-backref\" data-footnote-backref data-footnote-backref-idx=\"{}{}\" aria-label=\"Back to reference {}{}\">↩{}</a>",
+                ref_suffix, self.footnote_ix, ref_suffix, self.footnote_ix, ref_suffix, superscript
+            )?;
+        }
         Ok(true)
     }
 }

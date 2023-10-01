@@ -6,7 +6,7 @@ Collective](https://opencollective.com/comrak/all/badge.svg?label=financial+cont
 [![crates.io version](https://img.shields.io/crates/v/comrak.svg)](https://crates.io/crates/comrak)
 [![docs.rs](https://docs.rs/comrak/badge.svg)](https://docs.rs/comrak)
 
-Rust port of [github's `cmark-gfm`](https://github.com/github/cmark).
+Rust port of [github's `cmark-gfm`](https://github.com/github/cmark). *Currently synced with release `0.29.0.gfm.13`*.
 
 - [Installation](#installation)
 - [Usage](#usage)
@@ -76,6 +76,9 @@ Options:
       --relaxed-tasklist-character
           Enable relaxing which character is allowed in a tasklists
 
+      --relaxed-autolinks
+          Enable relaxing of autolink parsing, allowing links to be recognized when in brackets
+
       --default-info-string <INFO>
           Default value for fenced code block's info strings if none is given
 
@@ -144,8 +147,8 @@ the file does not exist.
 And there's a Rust interface. You can use `comrak::markdown_to_html` directly:
 
 ``` rust
-use comrak::{markdown_to_html, ComrakOptions};
-assert_eq!(markdown_to_html("Hello, **世界**!", &ComrakOptions::default()),
+use comrak::{markdown_to_html, Options};
+assert_eq!(markdown_to_html("Hello, **世界**!", &Options::default()),
            "<p>Hello, <strong>世界</strong>!</p>\n");
 ```
 
@@ -153,7 +156,7 @@ Or you can parse the input into an AST yourself, manipulate it, and then use you
 
 ``` rust
 extern crate comrak;
-use comrak::{parse_document, format_html, Arena, ComrakOptions};
+use comrak::{parse_document, format_html, Arena, Options};
 use comrak::nodes::{AstNode, NodeValue};
 
 // The returned nodes are created in the supplied Arena, and are bound by its lifetime.
@@ -162,7 +165,7 @@ let arena = Arena::new();
 let root = parse_document(
     &arena,
     "This is my input.\n\n1. Also my input.\n2. Certainly my input.\n",
-    &ComrakOptions::default());
+    &Options::default());
 
 fn iter_nodes<'a, F>(node: &'a AstNode<'a>, f: &F)
     where F : Fn(&'a AstNode<'a>) {
@@ -183,7 +186,7 @@ iter_nodes(root, &|node| {
 });
 
 let mut html = vec![];
-format_html(root, &ComrakOptions::default(), &mut html).unwrap();
+format_html(root, &Options::default(), &mut html).unwrap();
 
 assert_eq!(
     String::from_utf8(html).unwrap(),
@@ -193,6 +196,33 @@ assert_eq!(
      <li>Certainly your input.</li>\n\
      </ol>\n");
 ```
+
+## Benchmarking
+
+For running benchmarks, you will need to [install hyperfine](https://github.com/sharkdp/hyperfine#installation) and optionally cmake.
+
+If you want to just run the benchmark for `comrak`, with the current state of the repo, you can simply run
+```bash
+make bench-comrak
+```
+
+This will build comrak in release mode, and run benchmark on it. You will see the time measurements as reported by hyperfine in the console.
+
+Makefile also provides a way to run benchmarks for `comrak` current state (with your changes), `comrak` main branch, [`cmark-gfm`](https://github.com/github/cmark-gfm), [`pulldown-cmark`](https://github.com/raphlinus/pulldown-cmark) and [`markdown-it.rs`](https://github.com/rlidwka/markdown-it.rs). For this you will need to install `cmake`. After that make sure that you have set-up the git submodules. In case you have not installed submodules when cloning, you can do it by running
+```bash
+git submodule update --init
+```
+
+After this is done, you can run 
+```bash
+make bench-all
+```
+
+which will run benchmarks across all, and report the time take by each as well as relative time.
+
+Apart from this, CI is also setup for running benchmarks when a pull request is first opened. It will add a comment with the results on the pull request in a tabular format comparing the 5 versions. After that you can manually trigger this CI by commenting `/run-bench` on the PR, this will update the existing comment with new results. Note benchmarks won't be automatically run on each push.
+
+
 
 ## Security
 
@@ -224,7 +254,7 @@ Comrak additionally supports its own extensions, which are yet to be specced out
 - Shortcodes
 
 By default none are enabled; they are individually enabled with each parse by setting the appropriate values in the
-[`ComrakOptions` struct](https://docs.rs/comrak/newest/comrak/struct.ComrakOptions.html).
+[`ComrakExtensionOptions` struct](https://docs.rs/comrak/newest/comrak/struct.ComrakExtensionOptions.html).
 
 ## Plugins
 
@@ -233,7 +263,7 @@ By default none are enabled; they are individually enabled with each parse by se
 At the moment syntax highlighting of codefence blocks is the only feature that can be enhanced with plugins.
 
 Create an implementation of the `SyntaxHighlighterAdapter` trait, and then provide an instance of such adapter to
-`ComrakPlugins.render.codefence_syntax_highlighter`. For formatting a markdown document with plugins, use the
+`Plugins.render.codefence_syntax_highlighter`. For formatting a markdown document with plugins, use the
 `markdown_to_html_with_plugins` function, which accepts your plugin as a parameter.
 
 See the `syntax_highlighter.rs` and `syntect.rs` examples for more details.
@@ -242,7 +272,7 @@ See the `syntax_highlighter.rs` and `syntect.rs` examples for more details.
 
 [`syntect`](https://github.com/trishume/syntect) is a syntax highlighting library for Rust. By default, `comrak` offers
 a plugin for it. In order to utilize it, create an instance of `plugins::syntect::SyntectAdapter` and use it as your
-`ComrakPlugins` option.
+`Plugins` option.
 
 ## Related projects
 

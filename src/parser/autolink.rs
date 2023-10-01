@@ -10,6 +10,7 @@ pub(crate) fn process_autolinks<'a>(
     arena: &'a Arena<AstNode<'a>>,
     node: &'a AstNode<'a>,
     contents_str: &mut String,
+    relaxed_autolinks: bool,
 ) {
     let contents = contents_str.as_bytes();
     let len = contents.len();
@@ -17,8 +18,27 @@ pub(crate) fn process_autolinks<'a>(
 
     while i < len {
         let mut post_org = None;
+        let mut bracket_opening = 0;
 
+        // cmark-gfm ignores links inside brackets, such as `[[http://example.com]`
         while i < len {
+            if !relaxed_autolinks {
+                match contents[i] {
+                    b'[' => {
+                        bracket_opening += 1;
+                    }
+                    b']' => {
+                        bracket_opening -= 1;
+                    }
+                    _ => (),
+                }
+
+                if bracket_opening > 0 {
+                    i += 1;
+                    continue;
+                }
+            }
+
             match contents[i] {
                 b':' => {
                     post_org = url_match(arena, contents, i);
@@ -153,7 +173,9 @@ fn is_valid_hostchar(ch: char) -> bool {
 fn autolink_delim(data: &[u8], mut link_end: usize) -> usize {
     static LINK_END_ASSORTMENT: Lazy<[bool; 256]> = Lazy::new(|| {
         let mut sc = [false; 256];
-        for c in &[b'?', b'!', b'.', b',', b':', b'*', b'_', b'~', b'\'', b'"'] {
+        for c in &[
+            b'?', b'!', b'.', b',', b':', b'*', b'_', b'~', b'\'', b'"', b'[', b']',
+        ] {
             sc[*c as usize] = true;
         }
         sc
@@ -278,6 +300,8 @@ fn email_match<'a>(
 
     let size = contents.len();
 
+    let mut auto_mailto = true;
+    let mut is_xmpp = false;
     let mut rewind = 0;
 
     while rewind < i {
@@ -286,6 +310,21 @@ fn email_match<'a>(
         if isalnum(c) || EMAIL_OK_SET[c as usize] {
             rewind += 1;
             continue;
+        }
+
+        if c == b':' {
+            if validate_protocol("mailto", contents, i - rewind - 1) {
+                auto_mailto = false;
+                rewind += 1;
+                continue;
+            }
+
+            if validate_protocol("xmpp", contents, i - rewind - 1) {
+                is_xmpp = true;
+                auto_mailto = false;
+                rewind += 1;
+                continue;
+            }
         }
 
         break;
@@ -307,6 +346,8 @@ fn email_match<'a>(
             return None;
         } else if c == b'.' && link_end < size - i - 1 && isalnum(contents[i + link_end + 1]) {
             np += 1;
+        } else if c == b'/' && is_xmpp {
+            // xmpp allows a `/` in the url
         } else if c != b'-' && c != b'_' {
             break;
         }
@@ -326,7 +367,11 @@ fn email_match<'a>(
         return None;
     }
 
-    let mut url = "mailto:".to_string();
+    let mut url = if auto_mailto {
+        "mailto:".to_string()
+    } else {
+        "".to_string()
+    };
     let text = str::from_utf8(&contents[i - rewind..link_end + i]).unwrap();
     url.push_str(text);
 
@@ -345,4 +390,16 @@ fn email_match<'a>(
         (0, 1, 0, 1).into(),
     ));
     Some((inl, rewind, rewind + link_end))
+}
+
+fn validate_protocol(protocol: &str, contents: &[u8], cursor: usize) -> bool {
+    let size = contents.len();
+    let mut rewind = 0;
+
+    while rewind < cursor && isalpha(contents[cursor - rewind - 1]) {
+        rewind += 1;
+    }
+
+    size - cursor + rewind >= protocol.len()
+        && &contents[cursor - rewind..cursor] == protocol.as_bytes()
 }
